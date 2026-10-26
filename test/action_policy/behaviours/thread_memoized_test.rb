@@ -192,4 +192,138 @@ class TestThreadMemoized < Minitest::Test
     assert channel.talk_as?(user, channel.user)
     assert_equal 2, UserPolicy.policies.size
   end
+
+  module CountingCacheKeys
+    attr_reader :cache_keys_count
+
+    def policy_for_cache_key(**)
+      @cache_keys_count = cache_keys_count.to_i + 1
+      super
+    end
+  end
+
+  class UnmemoizedChatChannel
+    include ActionPolicy::Behaviour
+
+    attr_reader :user
+
+    authorize :user
+
+    def initialize(name)
+      @user = CacheableUser.new(name)
+    end
+
+    def talk?(user)
+      allowed_to?(:talk?, user)
+    end
+  end
+
+  class BothMemoizedChatChannel < UnmemoizedChatChannel
+    include ActionPolicy::Behaviours::ThreadMemoized
+    include ActionPolicy::Behaviours::Memoized
+    include CountingCacheKeys
+  end
+
+  class MemoizedFirstChatChannel < UnmemoizedChatChannel
+    include ActionPolicy::Behaviours::Memoized
+    include ActionPolicy::Behaviours::ThreadMemoized
+  end
+
+  class MemoizedSubChatChannel < ChatChannel
+    include ActionPolicy::Behaviours::Memoized
+  end
+
+  class MemoizedChatChannel < UnmemoizedChatChannel
+    include ActionPolicy::Behaviours::Memoized
+  end
+
+  class ThreadMemoizedSubChatChannel < MemoizedChatChannel
+    include ActionPolicy::Behaviours::ThreadMemoized
+  end
+
+  module ThreadMemoizedConcern
+    include ActionPolicy::Behaviours::ThreadMemoized
+  end
+
+  module MemoizedConcern
+    include ActionPolicy::Behaviours::Memoized
+  end
+
+  class ThreadMemoizedThroughConcernChatChannel < UnmemoizedChatChannel
+    include ActionPolicy::Behaviours::Memoized
+    include ThreadMemoizedConcern
+  end
+
+  class MemoizedThroughConcernChatChannel < UnmemoizedChatChannel
+    include ActionPolicy::Behaviours::ThreadMemoized
+    include MemoizedConcern
+  end
+
+  def test_cache_key_built_once_with_both_memoizations
+    channel = BothMemoizedChatChannel.new("admin")
+    user = User.new("guest")
+
+    assert channel.talk?(user)
+    assert channel.talk?(user)
+
+    assert_equal 2, channel.cache_keys_count
+    assert_equal 1, UserPolicy.policies.size
+  end
+
+  def test_thread_cache_shared_with_both_memoizations
+    user = User.new("guest")
+
+    assert BothMemoizedChatChannel.new("admin").talk?(user)
+    assert BothMemoizedChatChannel.new("admin").talk?(user)
+
+    assert_equal 1, UserPolicy.policies.size
+  end
+
+  def test_memoizations_included_in_any_order
+    channel = MemoizedFirstChatChannel.new("admin")
+
+    assert channel.talk?(User.new("guest"))
+    refute channel.talk?(User.new("admin"))
+    assert_equal 2, UserPolicy.policies.size
+  end
+
+  def test_thread_cache_shared_when_subclass_includes_memoized
+    user = User.new("guest")
+
+    assert MemoizedSubChatChannel.new("admin").talk?(user)
+    assert MemoizedSubChatChannel.new("admin").talk?(user)
+
+    assert_equal 1, UserPolicy.policies.size
+  end
+
+  def test_instance_cache_kept_when_subclass_includes_thread_memoized
+    ActionPolicy::PerThreadCache.enabled = false
+    channel = ThreadMemoizedSubChatChannel.new("admin")
+    user = User.new("guest")
+
+    assert channel.talk?(user)
+    assert channel.talk?(user)
+
+    assert_equal 1, UserPolicy.policies.size
+  end
+
+  def test_thread_cache_shared_when_included_through_a_module
+    user = User.new("guest")
+
+    assert ThreadMemoizedThroughConcernChatChannel.new("admin").talk?(user)
+    assert ThreadMemoizedThroughConcernChatChannel.new("admin").talk?(user)
+
+    assert_equal 1, UserPolicy.policies.size
+  end
+
+  def test_instance_cache_kept_when_included_through_a_module
+    ActionPolicy::PerThreadCache.enabled = false
+    channel = MemoizedThroughConcernChatChannel.new("admin")
+    user = User.new("guest")
+
+    assert channel.talk?(user)
+    assert channel.talk?(user)
+
+    assert_equal 1, UserPolicy.policies.size
+  end
 end

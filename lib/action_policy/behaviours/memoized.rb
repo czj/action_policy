@@ -2,6 +2,15 @@
 
 module ActionPolicy
   module Behaviours
+    # Builds the policy cache key once and passes it down the chain of
+    # memoization layers (Memoized, ThreadMemoized), each of them calling
+    # `super` on a cache miss.
+    module PolicyMemoization # :nodoc:
+      def policy_for(record:, **opts)
+        __policy_memoize__(policy_for_cache_key(record: record, **opts)) { super }
+      end
+    end
+
     # Per-instance memoization for policies.
     #
     # Used by `policy_for` to re-use policy object for records.
@@ -21,6 +30,7 @@ module ActionPolicy
     module Memoized
       class << self
         def prepended(base)
+          base.prepend PolicyMemoization
           base.prepend InstanceMethods
         end
 
@@ -28,20 +38,9 @@ module ActionPolicy
       end
 
       module InstanceMethods # :nodoc:
-        def policy_for(record:, **opts)
-          __policy_memoize__(record, **opts) { super }
+        def __policy_memoize__(cache_key)
+          __policies_cache__.fetch(cache_key) { __policies_cache__[cache_key] = super }
         end
-      end
-
-      def __policy_memoize__(record, **options)
-        cache_key = policy_for_cache_key(record: record, **options)
-
-        return __policies_cache__[cache_key] if
-          __policies_cache__.key?(cache_key)
-
-        policy = yield
-
-        __policies_cache__[cache_key] = policy
       end
 
       def __policies_cache__
