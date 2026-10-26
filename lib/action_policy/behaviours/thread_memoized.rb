@@ -29,6 +29,8 @@ module ActionPolicy
   end
 
   module Behaviours
+    require "action_policy/behaviours/memoized"
+
     # Per-thread memoization for policies.
     #
     # Used by `policy_for` to re-use policy object for records.
@@ -37,6 +39,7 @@ module ActionPolicy
     module ThreadMemoized
       class << self
         def prepended(base)
+          base.prepend PolicyMemoization
           base.prepend InstanceMethods
         end
 
@@ -44,15 +47,9 @@ module ActionPolicy
       end
 
       module InstanceMethods # :nodoc:
-        def policy_for(record:, **opts)
-          __policy_thread_memoize__(record, **opts) { super }
+        def __policy_memoize__(cache_key)
+          ActionPolicy::PerThreadCache.fetch(cache_key) { super }
         end
-      end
-
-      def __policy_thread_memoize__(record, **options)
-        cache_key = policy_for_cache_key(record: record, **options)
-
-        ActionPolicy::PerThreadCache.fetch(cache_key) { yield }
       end
     end
   end

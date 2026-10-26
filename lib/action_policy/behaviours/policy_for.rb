@@ -59,6 +59,9 @@ module ActionPolicy
         )
       end
 
+      # Terminal step of the memoization layers (see Memoized and ThreadMemoized)
+      def __policy_memoize__(_cache_key) = yield
+
       def policy_for_cache_key(record:, with: nil, namespace: nil, context: authorization_context, **)
         record_key = record._policy_cache_key(use_object_id: true)
         context_key = context.values.map { it._policy_cache_key(use_object_id: true) }.join(".")
