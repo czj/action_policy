@@ -18,11 +18,11 @@ end)
 
 # Ensure non-persistent models are not cached as a single entry
 ActiveRecord::Base.include(Module.new do
-  # Unlike cache_key_with_version, does not format updated_at on every lookup
   def policy_cache_key
     return object_id.to_s unless persisted?
+    # A select leaving updated_at out makes cache_version raise MissingAttributeError
+    return object_id.to_s if !has_attribute?("updated_at") && self.class.attribute_types.key?("updated_at")
 
-    updated_at = self["updated_at"] if has_attribute?("updated_at")
-    "#{self.class.name}/#{id}-#{updated_at&.to_f}"
+    cache_key_with_version
   end
 end)
